@@ -3,33 +3,37 @@ main.py
 =======
 Thin CLI that wires every module together.
 
-Pipeline (now with hybrid search + conversational memory + re-ranking):
+Pipeline (with parent-child chunking + hybrid + memory + reranking):
 
-        PDF ──► pdf_loader ──► chunks
+        PDF ──► pdf_loader ──► PARENTS  (big context units for the LLM)
+                              CHILDREN (small precise units for retrieval)
                                  │
-              ┌──────────────────┼──────────────────┐
-              ▼                  ▼                  ▼
-        embeddings          bm25_index          (kept in memory)
-        (FAISS dense)       (BM25 sparse)
-              └──────────────────┬──────────────────┘
-                                 │  (built once on startup)
-        ─────────────────────────────────────────────────────  (per-question)
+                          ┌──────┴──────┐
+                          ▼             ▼
+                       FAISS         BM25            (built on CHILDREN)
+                     (dense)        (sparse)
+                          │             │
+        ──────────────────────────────────────────  (per-question loop)
         user question
               │
               ▼
-        query_rewriter (uses chat history)  ──► standalone query
+        query_rewriter (uses chat history) ─► standalone query
               │
-              ├─► dense retrieval (FAISS, k=20)  ─┐
-              │                                    ├─► RRF fusion (hybrid.py)
-              └─► sparse retrieval (BM25, k=20)  ─┘        │
+              ├─► dense retrieval (children, k=20) ─┐
+              │                                      ├─► RRF fusion
+              └─► sparse retrieval (children, k=20) ─┘     │
                                                            ▼
-                                              reranker (cross-encoder, top 4)
+                                       cross-encoder rerank (children)
                                                            │
                                                            ▼
-                                          llm.answer (system + history + ctx)
+                                          take top_k CHILDREN, then
+                                          MAP CHILDREN → PARENTS (dedupe)
                                                            │
                                                            ▼
-                                          history.append(user + assistant)
+                                     LLM gets PARENT chunks for context
+                                                           │
+                                                           ▼
+                                            grounded answer w/ citations
 
 Usage:
     python main.py path/to/file.pdf
@@ -45,7 +49,7 @@ from config import settings
 from embeddings import build_index, load_embedder
 from hybrid import reciprocal_rank_fusion
 from llm import answer, make_client
-from pdf_loader import load_pdf
+from pdf_loader import children_to_parents, load_pdf
 from query_rewriter import rewrite_query
 from reranker import load_reranker, rerank
 from retriever import retrieve
@@ -66,45 +70,46 @@ def main() -> int:
         print("GROQ_API_KEY missing. Copy .env.example to .env and set it.", file=sys.stderr)
         return 1
 
-    # --- 1. Load + chunk the PDF --------------------------------------------
+    # --- 1. Load + chunk the PDF (now TWO levels) ---------------------------
+    # `parents` are the big context blocks we send to the LLM later.
+    # `children` are the small precise blocks we actually embed & search.
+    # Every child knows its parent_idx so we can hop from match → context.
     print(f"Loading PDF: {pdf_path}")
-    chunks = load_pdf(
+    parents, children = load_pdf(
         pdf_path,
-        chunk_size=settings.chunk_size,
-        chunk_overlap=settings.chunk_overlap,
+        parent_size=settings.parent_size,
+        parent_overlap=settings.parent_overlap,
+        child_size=settings.child_size,
+        child_overlap=settings.child_overlap,
     )
-    if not chunks:
+    if not children:
         print(
             "No extractable text found. The PDF may be scanned/image-only — "
             "you'd need an OCR step (e.g. pytesseract) to handle that.",
             file=sys.stderr,
         )
         return 1
-    print(f"Loaded {len(chunks)} chunks.")
+    print(f"Loaded {len(parents)} parents, {len(children)} children.")
 
     # --- 2. Load models + build indexes -------------------------------------
-    # We build BOTH a dense index (FAISS) and a sparse index (BM25). They're
-    # independent — different views of the same chunks — and run in parallel
-    # at query time.
+    # Both indexes are built on CHILDREN. Parents never get embedded — they
+    # only exist to be fetched once a child match is found.
     print(f"Loading embedder (bi-encoder): {settings.embed_model}")
     embedder = load_embedder(settings.embed_model)
 
     print(f"Loading re-ranker (cross-encoder): {settings.rerank_model}")
     reranker = load_reranker(settings.rerank_model)
 
-    print("Building FAISS index (dense / semantic)...")
-    dense_index = build_index(chunks, embedder)
+    print("Building FAISS index (dense / semantic) over children...")
+    dense_index = build_index(children, embedder)
 
-    print("Building BM25 index (sparse / keyword)...")
-    # BM25 needs no model download. It just precomputes term frequencies.
-    bm25 = build_bm25(chunks)
+    print("Building BM25 index (sparse / keyword) over children...")
+    bm25 = build_bm25(children)
 
     # --- 3. Chat loop -------------------------------------------------------
     client = make_client(settings.groq_api_key)
     print(f"Ready. Model: {settings.groq_model}. Type 'exit' to quit.\n")
 
-    # Conversation history grows as the user chats. We trim to the last N
-    # turns before sending — old context usually hurts more than it helps.
     history: list[dict[str, str]] = []
 
     while True:
@@ -121,9 +126,6 @@ def main() -> int:
         recent_history = history[-settings.history_turns :]
 
         # --- Step A: rewrite the question into a standalone form -----------
-        # Turns "what about its limitations?" into "what are the limitations
-        # of transformers?" using the prior chat as context. No-op on the
-        # first message.
         standalone_query = rewrite_query(
             client=client,
             model=settings.groq_model,
@@ -133,59 +135,51 @@ def main() -> int:
         if standalone_query != query:
             print(f"   (rewrote → {standalone_query!r})")
 
-        # --- Step B: hybrid retrieval --------------------------------------
-        # Dense and sparse run independently. Each casts a wide net of
-        # `retrieve_k` candidates. They surface DIFFERENT failure modes:
-        #   - dense will catch "automobile" when query says "car"
-        #   - sparse will catch "AX-9281" or "Vaswani" exactly
+        # --- Step B: hybrid retrieval over CHILDREN ------------------------
+        # We search children because they're small and precise. The right
+        # paragraph might be 5 sentences long; we want to match on the
+        # specific sentence, not on a noisy 1000-word window.
         dense_hits = retrieve(
-            standalone_query,
-            embedder,
-            dense_index,
-            chunks,
-            k=settings.retrieve_k,
+            standalone_query, embedder, dense_index, children, k=settings.retrieve_k
         )
         sparse_hits = bm25_search(
-            bm25,
-            chunks,
-            standalone_query,
-            k=settings.retrieve_k,
+            bm25, children, standalone_query, k=settings.retrieve_k
         )
-
-        # Fuse the two rankings with Reciprocal Rank Fusion. A chunk that
-        # both retrievers liked floats to the top because its RRF score
-        # accumulates twice. Output is deduplicated.
         fused = reciprocal_rank_fusion(
-            [dense_hits, sparse_hits],
-            k_rrf=settings.rrf_k,
+            [dense_hits, sparse_hits], k_rrf=settings.rrf_k
         )
 
-        # --- Step C: re-rank with the cross-encoder ------------------------
-        # The fused list may have up to 2*retrieve_k unique chunks. The
-        # cross-encoder re-scores them by reading (query, chunk) pairs
-        # together, then we keep the top `top_k` for the LLM.
-        top_chunks = rerank(
+        # --- Step C: cross-encoder re-rank (still on children) -------------
+        # The reranker scores (query, child) pairs. Children are the right
+        # size for the cross-encoder — full paragraphs would dilute the
+        # relevance signal.
+        top_children = rerank(
             reranker=reranker,
             query=standalone_query,
             candidates=fused,
             top_k=settings.top_k,
         )
 
-        # --- Step D: generate the grounded answer --------------------------
-        # We pass the ORIGINAL query and recent history so the reply feels
-        # like a continuation of the conversation. The rewrite only existed
-        # to help retrieval, not to be visible to the user.
+        # --- Step D: SMALL → BIG. Map child matches to their parents ------
+        # The crucial parent-child step. The LLM now receives the bigger
+        # parent block instead of the small child that matched. Same
+        # citation page (children inherit it from their parent).
+        # Dedupe: if 3 children point at the same parent, we send the
+        # parent once, not three times.
+        context_parents = children_to_parents(top_children, parents)
+
+        # --- Step E: generate the grounded answer --------------------------
         reply = answer(
             client=client,
             model=settings.groq_model,
             query=query,
-            context_chunks=top_chunks,
+            context_chunks=context_parents,
             temperature=settings.temperature,
             history=recent_history,
         )
         print(f"\nbot> {reply}\n")
 
-        # --- Step E: update conversation memory ----------------------------
+        # --- Step F: update conversation memory ----------------------------
         history.append({"role": "user", "content": query})
         history.append({"role": "assistant", "content": reply})
 

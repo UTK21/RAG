@@ -1,32 +1,34 @@
 """
 pdf_loader.py
 =============
-Pipeline stage 1: turn a PDF file on disk into a list of text `Chunk`s.
+Pipeline stage 1: turn a PDF into TWO levels of chunks.
 
-Two responsibilities:
-  1. Read each page's text out of the PDF (using pypdf).
-  2. Split that text into overlapping word-windows so each chunk is small
-     enough to embed and retrieve precisely.
+In naive RAG we had one chunk size doing two jobs at once:
+  * Be SMALL enough to embed precisely.
+  * Be LARGE enough to give the LLM enough surrounding context.
 
-Why chunk?
-----------
-  * Embedding models have an input length limit (a few hundred tokens). One
-    huge vector for a whole document loses fine-grained meaning — everything
-    "averages out".
-  * LLM context windows cost money/time. We want to send only the most
-    relevant slice of the document, not the whole thing.
+Those two goals fight each other. Parent-child chunking decouples them:
 
-Why per-page chunks (not document-wide)?
-----------------------------------------
-Splitting page-by-page means every chunk knows exactly which page it came
-from. That lets the LLM cite page numbers in its answers — a simple but
-powerful UX trick that makes hallucinations easy to spot.
+    ┌────────────────────────────────────────────┐
+    │  PARENT  (~1200 words, paragraph-sized)    │
+    │                                            │
+    │   ┌─────────┐ ┌─────────┐ ┌─────────┐      │
+    │   │ child 1 │ │ child 2 │ │ child 3 │ ...  │  ◄── ~240-word
+    │   └─────────┘ └─────────┘ └─────────┘      │     children
+    └────────────────────────────────────────────┘
+
+We EMBED the children (precise matching) but SEND THE PARENT to the LLM
+(rich context). Best of both worlds.
+
+Why per-page parents?
+---------------------
+Splitting page-by-page first means every parent (and therefore every child)
+knows exactly which page it came from — clean page citations.
 
 Caveat: scanned PDFs
 --------------------
-pypdf only extracts TEXT. If the PDF is just images of text (a scan), every
-page returns ""; you'd need OCR (e.g. pytesseract) to handle that. We don't
-crash — we just return an empty list and let main.py warn the user.
+pypdf only extracts TEXT, not images. Scanned PDFs return empty pages here;
+you'd need OCR (e.g. pytesseract) to handle those.
 """
 
 from __future__ import annotations
@@ -38,56 +40,124 @@ from pypdf import PdfReader
 
 @dataclass
 class Chunk:
-    """One unit of retrievable text plus the page it came from."""
+    """
+    A CHILD chunk — the small, precise unit we actually embed and search.
+    `parent_idx` points back into the parents list so we can fetch the
+    larger context when a match is found.
+    """
 
     text: str
-    page: int  # 1-based page number in the source PDF
+    page: int
+    parent_idx: int  # index into the parents list
 
 
-def load_pdf(path: str, chunk_size: int, chunk_overlap: int) -> list[Chunk]:
-    """Read the PDF and return all chunks across all pages."""
-    reader = PdfReader(path)
-    chunks: list[Chunk] = []
-    for i, page in enumerate(reader.pages, start=1):
-        # `or ""` guards against image-only pages where extract_text returns None.
-        text = (page.extract_text() or "").strip()
-        if text:
-            chunks.extend(split_text(text, page=i, size=chunk_size, overlap=chunk_overlap))
-    return chunks
-
-
-def split_text(text: str, page: int, size: int, overlap: int) -> list[Chunk]:
+@dataclass
+class ParentChunk:
     """
-    Word-based sliding-window chunker.
-
-    Example with size=10, overlap=2:
-        words = [w1 w2 ... w20]
-        chunk 1: w1..w10
-        chunk 2: w9..w18   (step = size - overlap = 8)
-        chunk 3: w17..w20
-
-    Overlap exists so that an important sentence sitting on a boundary still
-    appears INTACT in at least one chunk. Without it the sentence would be
-    split in two and neither half would match a query well.
-
-    We split on whitespace which is crude. A production system would split on
-    sentences (NLTK / spaCy / a regex) for cleaner cuts.
+    A PARENT chunk — the larger context unit we send to the LLM after a
+    child match. Bigger window = more surrounding info for the model.
     """
-    words = text.split()
+
+    text: str
+    page: int
+
+
+def _window(words: list[str], size: int, overlap: int) -> list[str]:
+    """
+    Generic word-based sliding-window splitter. Reused for BOTH the parent
+    pass (large windows) and the child pass (small windows) — only the
+    `size` and `overlap` change.
+
+    Overlap exists so an important sentence sitting on a window boundary
+    still appears INTACT in at least one chunk. Without overlap the sentence
+    would be cut in half across two adjacent chunks and neither half would
+    match a query well.
+    """
     if not words:
         return []
-
-    out: list[Chunk] = []
-    # `step` = how far the window advances each iteration.
+    out: list[str] = []
     step = max(1, size - overlap)
-
     for start in range(0, len(words), step):
         piece = " ".join(words[start : start + size])
         if piece:
-            out.append(Chunk(text=piece, page=page))
-        # Stop once we've consumed the whole page; otherwise the final partial
-        # window gets emitted as a shorter duplicate.
+            out.append(piece)
+        # Stop once the window has consumed the whole input; otherwise the
+        # last partial window gets emitted again as a shorter duplicate.
         if start + size >= len(words):
             break
+    return out
 
+
+def load_pdf(
+    path: str,
+    parent_size: int,
+    parent_overlap: int,
+    child_size: int,
+    child_overlap: int,
+) -> tuple[list[ParentChunk], list[Chunk]]:
+    """
+    Read the PDF and produce parents + children.
+
+    For each page:
+      1. Split the page into PARENTS (large windows, e.g. ~1200 words).
+      2. For each parent, split it further into CHILDREN (small windows,
+         e.g. ~240 words). Each child remembers its parent_idx.
+
+    Returns (parents, children) in two parallel lists. Children are what
+    we embed and search; parents are what we hand to the LLM.
+
+    Why split children FROM the parent text (not directly from the page)?
+    -------------------------------------------------------------------
+    So that no child ever crosses a parent boundary. When we later fetch
+    "the parent of this child", we get a clean, self-contained block — no
+    awkward halves of two different parents glued together.
+    """
+    reader = PdfReader(path)
+
+    parents: list[ParentChunk] = []
+    children: list[Chunk] = []
+
+    for page_num, page in enumerate(reader.pages, start=1):
+        text = (page.extract_text() or "").strip()
+        if not text:
+            continue
+
+        # --- Parent pass --------------------------------------------------
+        for parent_text in _window(text.split(), parent_size, parent_overlap):
+            parent_idx = len(parents)  # this parent's position in `parents`
+            parents.append(ParentChunk(text=parent_text, page=page_num))
+
+            # --- Child pass (within this parent) --------------------------
+            for child_text in _window(parent_text.split(), child_size, child_overlap):
+                children.append(
+                    Chunk(text=child_text, page=page_num, parent_idx=parent_idx)
+                )
+
+    return parents, children
+
+
+def children_to_parents(
+    matched_children: list[Chunk],
+    parents: list[ParentChunk],
+) -> list[ParentChunk]:
+    """
+    Map a ranked list of matched CHILD chunks to their corresponding
+    PARENT chunks, preserving order and deduplicating.
+
+    Why dedupe?
+    -----------
+    Often multiple children of the SAME parent will all rank high — the
+    matching content is concentrated in one part of the doc. Without
+    dedupe we'd send the same parent text to the LLM 3 times, burning
+    tokens and giving it nothing new.
+
+    Preserving order means the BEST-matching child's parent comes first.
+    """
+    seen: set[int] = set()
+    out: list[ParentChunk] = []
+    for child in matched_children:
+        if child.parent_idx in seen:
+            continue
+        seen.add(child.parent_idx)
+        out.append(parents[child.parent_idx])
     return out

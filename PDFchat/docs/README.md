@@ -13,25 +13,36 @@ The notes build on each other. The same chatbot upgrades through each stage:
 | 2 | [Conversational Memory](02-conversational-memory.md) | Standalone-question rewriting so follow-ups work. | ✅ Built |
 | 3 | [Re-ranking](03-reranking.md) | Cross-encoder second stage for precision. | ✅ Built |
 | 4 | [Hybrid Search](04-hybrid-search.md) | BM25 + dense + Reciprocal Rank Fusion. | ✅ Built |
+| 5 | [Parent-Child Chunking](05-parent-child-chunking.md) | Embed small children for matching, send big parents to the LLM. | ✅ Built |
 
 ## Current pipeline (everything turned on)
 
 ```
+   PDF ──► parents (big)  +  children (small, point to parent) ─── note #5
+                                │
+                       ┌────────┴────────┐
+                       ▼                 ▼
+                    FAISS              BM25       (built on CHILDREN)
+                                │
+        ────────────────────────────────────────  (per question)
                           user question
                                 │
                                 ▼
                        query_rewriter ─── note #2
                                 │
                                 ▼
-                ┌─── dense retrieval (FAISS)
-                │                              ─── note #4
-                └─── sparse retrieval (BM25)
+                ┌─── dense retrieval (children)
+                │                                ─── note #4
+                └─── sparse retrieval (children)
                                 │
                                 ▼
                        RRF fusion ─── note #4
                                 │
                                 ▼
-                       cross-encoder re-rank ─── note #3
+                cross-encoder re-rank (children) ─── note #3
+                                │
+                                ▼
+              top-k children  ─►  PARENTS (dedupe) ─── note #5
                                 │
                                 ▼
                               LLM
@@ -44,7 +55,7 @@ The notes build on each other. The same chatbot upgrades through each stage:
 
 | Code file | Implements |
 |-----------|------------|
-| `pdf_loader.py` | Naive RAG |
+| `pdf_loader.py` | Naive RAG + Parent-Child (note #5) |
 | `embeddings.py` | Naive RAG |
 | `retriever.py` | Naive RAG (dense half) |
 | `llm.py` | Naive RAG + chat history (note #2) |
@@ -73,9 +84,8 @@ python main.py path/to/your.pdf
 
 Roughly in order of "next things I should build":
 
-- Persistent indexes (save/load FAISS + BM25 so I don't re-embed every run)
-- Parent-child chunking (embed small, send large)
 - Multi-PDF ingestion (one bot, many sources, cite by doc name)
+- Persistent indexes (save/load FAISS + BM25 so I don't re-embed every run)
 - Streaming responses (word-by-word output)
 - Evaluation harness (measure actual quality, not vibes)
 - Agentic RAG (multi-step search loops)

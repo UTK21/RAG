@@ -42,12 +42,15 @@ class Settings:
     # MiniLM is small (~80MB), fast on CPU, and good enough for general English.
     embed_model: str
 
-    # --- Chunking -----------------------------------------------------------
-    # Words per chunk. ~800 words ≈ ~1 page of dense text.
-    chunk_size: int
-    # How many words adjacent chunks share. Prevents splitting a key sentence
-    # cleanly in half across two chunks.
-    chunk_overlap: int
+    # --- Chunking (parent-child / small-to-big) -----------------------------
+    # PARENT: the larger context unit sent to the LLM. Big enough to give the
+    # model the surrounding paragraph(s) of any match.
+    parent_size: int
+    parent_overlap: int
+    # CHILD: the smaller unit we actually embed and search. Small enough for
+    # the embedding to point at one specific idea, not a topic salad.
+    child_size: int
+    child_overlap: int
 
     # --- Retrieval (now hybrid: dense + sparse, then fuse, then re-rank) ----
     # Stage 1 (recall): how many chunks EACH retriever returns. Dense and
@@ -80,8 +83,10 @@ def load_settings() -> Settings:
         groq_api_key=os.getenv("GROQ_API_KEY"),
         groq_model=os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
         embed_model=os.getenv("EMBED_MODEL", "sentence-transformers/all-MiniLM-L6-v2"),
-        chunk_size=int(os.getenv("CHUNK_SIZE", "800")),
-        chunk_overlap=int(os.getenv("CHUNK_OVERLAP", "150")),
+        parent_size=int(os.getenv("PARENT_SIZE", "1200")),
+        parent_overlap=int(os.getenv("PARENT_OVERLAP", "200")),
+        child_size=int(os.getenv("CHILD_SIZE", "240")),
+        child_overlap=int(os.getenv("CHILD_OVERLAP", "40")),
         retrieve_k=int(os.getenv("RETRIEVE_K", "20")),
         rrf_k=int(os.getenv("RRF_K", "60")),
         top_k=int(os.getenv("TOP_K", "4")),
