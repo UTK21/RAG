@@ -14,6 +14,8 @@ The notes build on each other. The same chatbot upgrades through each stage:
 | 3 | [Re-ranking](03-reranking.md) | Cross-encoder second stage for precision. | ✅ Built |
 | 4 | [Hybrid Search](04-hybrid-search.md) | BM25 + dense + Reciprocal Rank Fusion. | ✅ Built |
 | 5 | [Parent-Child Chunking](05-parent-child-chunking.md) | Embed small children for matching, send big parents to the LLM. | ✅ Built |
+| 6 | [Query Rewriting](06-query-rewriting.md) | Deep dive: standalone, multi-query, HyDE, decomposition, step-back, RAG-Fusion, routing. | 📖 Concept reference |
+| ★ | [Cheatsheet](cheatsheet.md) | Worked example + annotated pipeline + mental models table. | 📖 Quick reference |
 
 ## Current pipeline (everything turned on)
 
