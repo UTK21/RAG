@@ -1,0 +1,5 @@
+# Claude Code local files — keep on disk, never commit/push
+.claude/
+
+# macOS
+.DS_Store
