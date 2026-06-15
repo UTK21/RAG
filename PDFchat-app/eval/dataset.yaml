@@ -1,0 +1,16 @@
+# Eval dataset. Each item has:
+#   question         the user query to send
+#   expected_doc     the PDF the answer should come from (basename, e.g. report.pdf)
+#   expected_page    the page the answer should come from (or null if any page)
+#   expected_keywords list of strings the answer SHOULD contain (lowercased substring match)
+#   notes            free-form: why this question matters / what we're testing
+#
+# Seed this with `python eval/seed.py`, then HAND-EDIT to remove bad questions
+# and fix wrong answers. The dataset is only as good as the human pass.
+
+# Example (delete and replace with your own once you have PDFs):
+# - question: "What does the recipe say about adding cream to carbonara?"
+#   expected_doc: "recipes.pdf"
+#   expected_page: 4
+#   expected_keywords: ["not authentic", "no cream"]
+#   notes: "Should reject cream; tests negation handling."

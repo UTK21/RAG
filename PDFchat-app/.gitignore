@@ -1,0 +1,11 @@
+# Project-specific paths. Generic rules (.env, .venv, caches, OS noise)
+# live in the repo-root .gitignore.
+
+# User PDFs — never commit your source documents
+# Pattern note: `data/*` (not `data/`) so the `!data/.gitkeep` re-include works.
+data/*
+!data/.gitkeep
+
+# Built indexes — may contain embeddings of proprietary content
+indexes/*
+!indexes/.gitkeep
