@@ -15,6 +15,7 @@ The notes build on each other. The same chatbot upgrades through each stage:
 | 4 | [Hybrid Search](04-hybrid-search.md) | BM25 + dense + Reciprocal Rank Fusion. | ✅ Built |
 | 5 | [Parent-Child Chunking](05-parent-child-chunking.md) | Embed small children for matching, send big parents to the LLM. | ✅ Built |
 | 6 | [Query Rewriting](06-query-rewriting.md) | Deep dive: standalone, multi-query, HyDE, decomposition, step-back, RAG-Fusion, routing. | 📖 Concept reference |
+| 7 | [Evaluation Harness](07-evaluation-harness.md) | Datasets, per-stage metrics, LLM-as-judge, production patterns. Built in `PDFchat-app/eval/`. | 📖 Concept + product reference |
 | ★ | [Cheatsheet](cheatsheet.md) | Worked example + annotated pipeline + mental models table. | 📖 Quick reference |
 
 ## Current pipeline (everything turned on)
