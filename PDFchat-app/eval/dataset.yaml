@@ -1,16 +1,45 @@
-# Eval dataset. Each item has:
-#   question         the user query to send
-#   expected_doc     the PDF the answer should come from (basename, e.g. report.pdf)
-#   expected_page    the page the answer should come from (or null if any page)
-#   expected_keywords list of strings the answer SHOULD contain (lowercased substring match)
-#   notes            free-form: why this question matters / what we're testing
+# Eval dataset.
 #
-# Seed this with `python eval/seed.py`, then HAND-EDIT to remove bad questions
-# and fix wrong answers. The dataset is only as good as the human pass.
+# Per-case fields:
+#   question         the user query to send
+#   expected_doc     basename of the PDF the answer should come from
+#   expected_page    1-based page number (or null for "any page")
+#   expected_keywords list of strings the answer SHOULD contain (substring, case-insensitive)
+#   notes            free-form: what we're testing
+#   history          (optional) list of {role, content} for follow-up tests
+#
+# Goal: tiny but diverse. Each case should exercise a DIFFERENT failure mode.
 
-# Example (delete and replace with your own once you have PDFs):
-# - question: "What does the recipe say about adding cream to carbonara?"
-#   expected_doc: "recipes.pdf"
-#   expected_page: 4
-#   expected_keywords: ["not authentic", "no cream"]
-#   notes: "Should reject cream; tests negation handling."
+# -- 1. Standalone single-doc lookup ------------------------------------------
+- question: "What ingredients are used in authentic Italian carbonara?"
+  expected_doc: "italian_classics.pdf"
+  expected_page: 1
+  expected_keywords: ["guanciale", "Pecorino", "eggs", "spaghetti"]
+  notes: "Basic single-doc factual lookup. Should hit Italian PDF cleanly."
+
+# -- 2. Multi-doc disagreement ------------------------------------------------
+- question: "Does carbonara use cream?"
+  expected_doc: "italian_classics.pdf"
+  expected_page: 1
+  expected_keywords: ["no cream", "authentic"]
+  notes: |
+    Tests multi-doc conflict surfacing. Italian says no, American says yes.
+    Answer should name both sources and not silently pick one.
+
+# -- 3. Follow-up question (the rewriter-bug demo) ----------------------------
+- question: "what about for a beginner cook?"
+  history:
+    - role: user
+      content: "Does carbonara use cream?"
+    - role: assistant
+      content: |
+        Sources disagree. italian_classics.pdf (p. 1) says authentic
+        carbonara uses no cream. american_kitchen.pdf (p. 1) says the
+        American-style version uses heavy cream for forgiveness.
+  expected_doc: "american_kitchen.pdf"
+  expected_page: 1
+  expected_keywords: ["forgiving", "easier"]
+  notes: |
+    Follow-up — has no standalone signal. The rewriter MUST produce a
+    question, not an answer. Catches the small-model rewriter bug
+    documented in Isses_faced/01-*.md.

@@ -98,7 +98,44 @@ def keyword_coverage(
 
 
 # ---------------------------------------------------------------------------
-# 4. LLM-judge score
+# 4. Rewrite quality (per-stage metric for the query rewriter)
+#    Catches small models that "help" by answering the question instead of
+#    rephrasing it. Deterministic, free. See Isses_faced/01-*.md for the bug
+#    this exists to catch.
+# ---------------------------------------------------------------------------
+
+_ANSWER_PREFIXES = (
+    "i would", "i recommend", "i suggest",
+    "the ", "a ", "an ",
+    "according to", "based on",
+    "for someone", "for a beginner", "for beginners",
+    "yes,", "no,", "it depends",
+)
+
+
+def rewrite_quality(standalone_query: str, original_question: str) -> MetricResult:
+    """Pass if the rewrite is a question; fail if it looks like an answer."""
+    # No rewrite happened (first turn, or already-standalone query) → vacuous pass.
+    if standalone_query.strip() == original_question.strip():
+        return MetricResult("rewrite_quality", 1.0, True, "no rewrite (already standalone)")
+
+    s = standalone_query.strip()
+    looks_like_answer = (
+        len(s.split()) > 30                           # too long for a question
+        or not s.rstrip(".!").endswith("?")           # doesn't end with ?
+        or s.lower().startswith(_ANSWER_PREFIXES)     # opens like an answer
+    )
+    passed = not looks_like_answer
+    detail = (
+        f"rewrite is a question: {s[:60]!r}"
+        if passed
+        else f"rewrite looks like an answer: {s[:80]!r}"
+    )
+    return MetricResult("rewrite_quality", 1.0 if passed else 0.0, passed, detail)
+
+
+# ---------------------------------------------------------------------------
+# 5. LLM-judge score
 #    Holistic 1..5 score from a separate LLM call. Noisier, costs API tokens.
 # ---------------------------------------------------------------------------
 

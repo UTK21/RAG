@@ -24,6 +24,7 @@ from eval.metrics import (
     keyword_coverage,
     llm_judge,
     retrieval_recall,
+    rewrite_quality,
 )
 from pdfchat import storage
 from pdfchat.config import load_settings
@@ -96,13 +97,17 @@ def main() -> int:
         expected_doc = case["expected_doc"]
         expected_page = case.get("expected_page")
         expected_keywords = case.get("expected_keywords") or []
+        # Optional: chat history for follow-up test cases. List of
+        # {role, content} dicts in chronological order.
+        history = case.get("history") or []
 
-        reply, trace = pipe.answer(question)
+        reply, trace = pipe.answer(question, history=history)
 
         results: list[MetricResult] = [
             retrieval_recall(expected_doc, expected_page, trace.top_children),
             citation_match(expected_doc, expected_page, reply),
             keyword_coverage(expected_keywords, reply),
+            rewrite_quality(trace.standalone_query, question),
         ]
         if not args.no_judge:
             results.append(
