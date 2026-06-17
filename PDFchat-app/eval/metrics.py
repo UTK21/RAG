@@ -50,7 +50,21 @@ def retrieval_recall(
 #    Does the bot's answer cite (doc.pdf p. N) for the right doc + page?
 # ---------------------------------------------------------------------------
 
-_CITE_RE = re.compile(r"\(\s*([^()\s]+\.pdf)\s+p\.?\s*(\d+)\s*\)", re.IGNORECASE)
+# Citation regex. Accepts multiple formats the LLM might emit:
+#   (doc.pdf p. 1)     ← what the system prompt asked for
+#   doc.pdf (p. 1)     ← what llama-3.3-70b actually emits
+#   doc.pdf, p. 1      ← occasional variant
+#   doc.pdf p. 1       ← bare form
+# The {0,4} on the separator class keeps us from matching false positives
+# like "notes.pdf is great because... p. 1 of the manual" where doc and page
+# are far apart.
+_CITE_RE = re.compile(
+    r"([\w\-]+\.pdf)"     # doc name
+    r"[\s,()]{0,4}"       # up to 4 chars of separator (space, comma, parens)
+    r"p\.?\s*"            # 'p' or 'p.'
+    r"(\d+)",             # page
+    re.IGNORECASE,
+)
 
 
 def citation_match(
@@ -60,7 +74,7 @@ def citation_match(
 ) -> MetricResult:
     cites = _CITE_RE.findall(answer_text)
     if not cites:
-        return MetricResult("citation_match", 0.0, False, "no (doc.pdf p. N) citations found")
+        return MetricResult("citation_match", 0.0, False, "no doc.pdf+page citations found")
 
     for doc, page in cites:
         if doc.lower() == expected_doc.lower() and (
