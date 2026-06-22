@@ -17,6 +17,7 @@ The notes build on each other. The same chatbot upgrades through each stage:
 | 6 | [Query Rewriting](06-query-rewriting.md) | Deep dive: standalone, multi-query, HyDE, decomposition, step-back, RAG-Fusion, routing. | 📖 Concept reference |
 | 7 | [Evaluation Harness](07-evaluation-harness.md) | Datasets, per-stage metrics, LLM-as-judge, production patterns. Built in `PDFchat-app/eval/`. | 📖 Concept + product reference |
 | 8 | [Tier 2 Roadmap](08-tier-2-roadmap.md) | Contextual Retrieval, Self-RAG, Agentic, Multimodal, GraphRAG, fine-tuning, CAG — topic by topic. | 🗺️ Forward-looking |
+| 9 | [Interview Questions](09-interview-questions.md) | 23 questions with model answers across foundations, design, debugging, system design, eval, and behavioral. | 🎯 Self-test |
 | ★ | [Cheatsheet](cheatsheet.md) | Worked example + annotated pipeline + mental models table. | 📖 Quick reference |
 
 ## Current pipeline (everything turned on)
