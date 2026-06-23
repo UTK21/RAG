@@ -45,7 +45,20 @@ Loads the saved indexes, refuses to start if the PDFs have changed since
 the last ingest (run `ingest.py` again in that case), then drops into a
 chat loop with streaming output and per-question source citations.
 
-### 3. `eval.py` — measure quality
+### 3. `agent_chat.py` — agentic REPL (multi-step search)
+
+```bash
+python agent_chat.py
+```
+
+Like `chat.py`, but the LLM can call `search_corpus` multiple times with
+refined queries before answering, instead of one fixed retrieval pass.
+Best demoed with a question that needs information from multiple
+places, e.g. "Compare how the two cookbooks treat spice level across
+all dishes." See `pdfchat/agent.py` for the hand-rolled ReAct loop and
+`PDFchat/docs/10-agentic-rag-manual-loop.md` for the full writeup.
+
+### 4. `eval.py` — measure quality
 
 ```bash
 python eval/seed.py            # auto-bootstrap a dataset stub
@@ -73,6 +86,7 @@ The harness reports four metrics per question:
 ```
 PDFchat-app/
 ├── ingest.py / chat.py / eval.py     # CLI entry points
+├── agent_chat.py                     # agentic REPL (multi-step search)
 ├── pdfchat/                          # importable package
 │   ├── config.py
 │   ├── loader.py                     # multi-PDF + parent-child + doc_name
@@ -81,7 +95,9 @@ PDFchat-app/
 │   ├── query_rewrite.py              # standalone + HyDE
 │   ├── llm.py                        # streaming + grounded prompt
 │   ├── storage.py                    # save/load + manifest + freshness
-│   └── pipeline.py                   # orchestrator (used by chat & eval)
+│   ├── pipeline.py                   # orchestrator (used by chat & eval)
+│   ├── tools.py                      # search_corpus tool (schema + impl)
+│   └── agent.py                      # hand-rolled ReAct loop (agent_chat.py)
 ├── eval/
 │   ├── dataset.yaml                  # hand-curated ground truth
 │   ├── seed.py                       # LLM-assisted dataset bootstrapper
