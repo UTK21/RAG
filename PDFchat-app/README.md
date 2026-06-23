@@ -58,6 +58,18 @@ places, e.g. "Compare how the two cookbooks treat spice level across
 all dishes." See `pdfchat/agent.py` for the hand-rolled ReAct loop and
 `PDFchat/docs/10-agentic-rag-manual-loop.md` for the full writeup.
 
+### 3b. `agent_chat_langgraph.py` — same agent, LangGraph-backed
+
+```bash
+python agent_chat_langgraph.py
+```
+
+Identical behavior to `agent_chat.py`, but the loop is expressed as a
+LangGraph `StateGraph` (nodes, edges, conditional routing) instead of a
+hand-written `for` loop. Built to be compared line-by-line against the
+manual version — see `pdfchat/agent_langgraph.py` and
+`PDFchat/docs/11-langgraph-concepts.md` for the full concept mapping.
+
 ### 4. `eval.py` — measure quality
 
 ```bash
@@ -87,6 +99,7 @@ The harness reports four metrics per question:
 PDFchat-app/
 ├── ingest.py / chat.py / eval.py     # CLI entry points
 ├── agent_chat.py                     # agentic REPL (multi-step search)
+├── agent_chat_langgraph.py           # same agent, LangGraph-backed
 ├── pdfchat/                          # importable package
 │   ├── config.py
 │   ├── loader.py                     # multi-PDF + parent-child + doc_name
@@ -97,7 +110,8 @@ PDFchat-app/
 │   ├── storage.py                    # save/load + manifest + freshness
 │   ├── pipeline.py                   # orchestrator (used by chat & eval)
 │   ├── tools.py                      # search_corpus tool (schema + impl)
-│   └── agent.py                      # hand-rolled ReAct loop (agent_chat.py)
+│   ├── agent.py                      # hand-rolled ReAct loop (agent_chat.py)
+│   └── agent_langgraph.py            # LangGraph port of the same loop
 ├── eval/
 │   ├── dataset.yaml                  # hand-curated ground truth
 │   ├── seed.py                       # LLM-assisted dataset bootstrapper

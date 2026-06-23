@@ -6,3 +6,8 @@ python-dotenv>=1.0.0
 numpy>=1.26.0
 rank-bm25>=0.2.2
 pyyaml>=6.0
+
+# LangGraph port of the manual agentic loop (pdfchat/agent.py)
+langgraph>=1.2.0
+langchain-groq>=1.1.0
+langchain-core>=1.4.0

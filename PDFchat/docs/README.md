@@ -19,6 +19,7 @@ The notes build on each other. The same chatbot upgrades through each stage:
 | 8 | [Tier 2 Roadmap](08-tier-2-roadmap.md) | Contextual Retrieval, Self-RAG, Agentic, Multimodal, GraphRAG, fine-tuning, CAG — topic by topic. | 🗺️ Forward-looking |
 | 9 | [Interview Questions](09-interview-questions.md) | 23 questions with model answers across foundations, design, debugging, system design, eval, and behavioral. | 🎯 Self-test |
 | 10 | [Agentic RAG — Manual Loop](10-agentic-rag-manual-loop.md) | Hand-rolled ReAct loop (no framework). Built in `PDFchat-app/pdfchat/agent.py`. Prerequisite for LangGraph + MCP + multi-agent. | ✅ Built |
+| 11 | [LangGraph Concepts](11-langgraph-concepts.md) | State/Node/Edge/conditional edges, mapped line-by-line to the manual loop. Ported in `PDFchat-app/pdfchat/agent_langgraph.py`. | ✅ Built |
 | ★ | [Cheatsheet](cheatsheet.md) | Worked example + annotated pipeline + mental models table. | 📖 Quick reference |
 
 ## Current pipeline (everything turned on)
